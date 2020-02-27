@@ -6,7 +6,7 @@ from flask_sqlalchemy import SQLAlchemy
 
 from flask_wtf import FlaskForm as Form
 from wtforms.fields import StringField
-from wtforms.validators import Required, Length
+from wtforms.validators import DataRequired, Length, ValidationError
 from werkzeug.datastructures import MultiDict
 
 app = Flask(__name__)
@@ -14,7 +14,8 @@ app.config.update(dict(
     # 关闭一些不必要的提示
     SQLALCHEMY_TRACK_MODIFICATIONS=False,
     # 使用sqlite数据库
-    SQLALCHEMY_DATABASE_URI='sqlite:///F:\\NAS_document\\study\\Flask+VueJS\\message-board\\database.db'
+    # SQLALCHEMY_DATABASE_URI='sqlite:///F:\\NAS_document\\study\\Flask+VueJS\\message-board\\database.db'
+    SQLALCHEMY_DATABASE_URI='sqlite:///..\\database.db'
 ))
 db = SQLAlchemy(app)
 
@@ -24,7 +25,7 @@ class Message(db.Model):
     __tablename__ = 'message'
 
     id = db.Column(db.Integer, primary_key=True)
-    # index创建索引，nullable表示不能为空
+    # index创建索引，nullable为false表示不能为空
     name = db.Column(db.String(64), index=True, nullable=False)
     text = db.Column(db.String(1000), nullable=False)
     # 设置了default值，所以前端不需要传创建时间过来
@@ -42,8 +43,30 @@ class MessageForm(Form):
     """
     根据 Message Model 定义相应的 Form
     """
-    name = StringField(validators=[Required(), Length(1, 64)])
-    text = StringField(validators=[Required(), Length(1, 1000)])
+    name = StringField(validators=[
+        DataRequired(message=u'请输入您的姓名'),
+        Length(1, 10, message=u'姓名长度需要在1~10个字符之间')
+    ])
+    text = StringField(validators=[
+        DataRequired(message=u'请输入您的留言'),
+        Length(1, 1000, message=u'留言长度要在10~1000字符之间')
+    ])
+
+    # 这个函数是我们自定义的验证函数，用于检查名字是否已经存在
+    # 要自定义验证函数有一定的格式
+    #   函数名称：validate + field_name
+    #   参数：要传入field，在函数中可以通过‘file.data’获取字段
+    #   函数体：检测到错误，raise ValidationError
+    def validate_name(self, field):
+        if Message.query.filter_by(name=field.data).first():
+            raise ValidationError(u'名称已经存在')
+
+    def create_message(self):
+        msg = Message(name=self.name.data, text=self.text.data)
+        db.session.add(msg)
+        db.session.commit()
+        return msg
+
 
 @app.route('/api/messages', methods=['GET'])
 def get_messages():
@@ -62,6 +85,7 @@ def create_message():
     # 由于 wtforms 实际上是用来验证表单数据的，但我们想用它来验证Ajax传的JSON数据时，
     # 需要我们自己去初始化这个form
     formdata = MultiDict(request.get_json())
+    print(formdata)
     form = MessageForm(formdata=formdata, obj=None, meta={'csrf': False})
     if not form.validate():
         # 数据验证失败时直接返回
@@ -71,10 +95,11 @@ def create_message():
         # 422 表示请求是正确地，单服务器处理不了请求的数据
         return jsonify(ok=False, errors=form.errors), 422
     # 请求数据无误创建Message
-    msg = Message(name=formdata['name'], text=formdata['text'])
-    db.session.add(msg)
-    db.session.commit()
-    # 201 表示资源创建成功
+    # msg = Message(name=formdata['name'], text=formdata['text'])
+    # db.session.add(msg)
+    # db.session.commit()
+    # 20 1 表示资源创建成功
+    msg = form.create_message()
     return jsonify(ok=True), 201
 
 
